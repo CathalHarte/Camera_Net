@@ -81,33 +81,7 @@ namespace Camera_NET
                 EmitIndex1 = true
             };
 
-            // returns IAviVideoStream
-            m_stream = m_writer.AddVideoStream();
-
-            // set standard VGA resolution
-            m_stream.Width = 1280;
-            m_stream.Height = 720;
-            // class SharpAvi.CodecIds contains FOURCCs for several well-known codecs
-            // Uncompressed is the default value, just set it for clarity
-            m_stream.Codec = CodecIds.Uncompressed;
-            // Uncompressed format requires to also specify bits per pixel
-            m_stream.BitsPerPixel = BitsPerPixel.Bpp24;
-
-            System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
-
-            // Set the timer interval to 33 milliseconds (1000ms / 30 frames per second = 33ms per frame)
-            timer.Interval = 100;
-
-            // Subscribe to the timer's Tick event
-            timer.Tick += Timer_Tick;
-
-            // Start the timer
-            // timer.Start();
-        }
-
-        private void Timer_Tick(object sender, EventArgs e)
-        {
-            SnapshotNextFrame();
+            m_stream = m_writer.AddMJpegImageSharpVideoStream(1280, 720, quality: 70);
         }
 
         /// <summary>
@@ -131,9 +105,9 @@ namespace Camera_NET
             int hr;
             AMMediaType media = new AMMediaType();
 
-            // Set the media type to Video/RBG24
+            // Set the media type to Video/RBG32
             media.majorType = MediaType.Video;
-            media.subType = MediaSubType.RGB24;
+            media.subType = MediaSubType.RGB32;
             media.formatType = FormatType.VideoInfo;
             hr = m_SampleGrabber.SetMediaType(media);
             DsError.ThrowExceptionForHR(hr);
@@ -209,7 +183,7 @@ namespace Camera_NET
             // a second call can overwrite the previous image.
             Debug.Assert(BufferLen == Math.Abs(m_videoBitCount/8*m_videoWidth) * m_videoHeight, "Incorrect buffer length");
 
-            Bitmap bitmap = new Bitmap(m_videoWidth, m_videoHeight, (m_videoBitCount / 8) * m_videoWidth, PixelFormat.Format24bppRgb, pBuffer);
+            Bitmap bitmap = new Bitmap(m_videoWidth, m_videoHeight, (m_videoBitCount / 8) * m_videoWidth, PixelFormat.Format32bppRgb, pBuffer);
 
             thing++;
 
@@ -217,6 +191,7 @@ namespace Camera_NET
             {
                 // Assuming 'bitmap' is the Bitmap that you want to convert to a byte array
                 Rectangle rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+                bitmap.RotateFlip(RotateFlipType.RotateNoneFlipY);
                 BitmapData bitmapData = bitmap.LockBits(rect, ImageLockMode.ReadOnly, bitmap.PixelFormat);
                 IntPtr ptr = bitmapData.Scan0;
 
@@ -228,6 +203,8 @@ namespace Camera_NET
 
                 // Use Marshal.Copy to copy the pixel data from the bitmap to the byte array
                 Marshal.Copy(ptr, byteArray, 0, byteCount);
+
+                
 
                 m_stream.WriteFrame(true, // is a key frame? (many codecs use the concept of key frames, for others - all frames are keys)
                   byteArray, // an array with frame data
