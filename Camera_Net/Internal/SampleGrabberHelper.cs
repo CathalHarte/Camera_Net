@@ -37,6 +37,14 @@ namespace Camera_NET
     // Use DirectShowLib (LGPL v2.1)
     using DirectShowLib;
 
+    // Contains common types for AVI format like FourCC
+    using SharpAvi;
+    // Contains types used for writing like AviWriter
+    using SharpAvi.Output;
+    // Contains types related to encoding like Mpeg4VcmVideoEncoder
+    using SharpAvi.Codecs;
+    using System.Threading.Tasks;
+
     #endregion
 
     /// <summary>
@@ -63,6 +71,43 @@ namespace Camera_NET
 
             // tell the callback to ignore new images
             m_PictureReady = new ManualResetEvent(false);
+
+            m_writer = new AviWriter("test.avi")
+            {
+                FramesPerSecond = 30,
+                // Emitting the AVI v1 index in addition to the OpenDML index (AVI v2)
+                // improves compatibility with some software, including 
+                // standard Windows programs like Media Player and File Explorer
+                EmitIndex1 = true
+            };
+
+            // returns IAviVideoStream
+            m_stream = m_writer.AddVideoStream();
+
+            // set standard VGA resolution
+            m_stream.Width = 1280;
+            m_stream.Height = 720;
+            // class SharpAvi.CodecIds contains FOURCCs for several well-known codecs
+            // Uncompressed is the default value, just set it for clarity
+            m_stream.Codec = CodecIds.Uncompressed;
+            // Uncompressed format requires to also specify bits per pixel
+            m_stream.BitsPerPixel = BitsPerPixel.Bpp24;
+
+            System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
+
+            // Set the timer interval to 33 milliseconds (1000ms / 30 frames per second = 33ms per frame)
+            timer.Interval = 100;
+
+            // Subscribe to the timer's Tick event
+            timer.Tick += Timer_Tick;
+
+            // Start the timer
+            // timer.Start();
+        }
+
+        private void Timer_Tick(object sender, EventArgs e)
+        {
+            SnapshotNextFrame();
         }
 
         /// <summary>
@@ -164,6 +209,38 @@ namespace Camera_NET
             // a second call can overwrite the previous image.
             Debug.Assert(BufferLen == Math.Abs(m_videoBitCount/8*m_videoWidth) * m_videoHeight, "Incorrect buffer length");
 
+            Bitmap bitmap = new Bitmap(m_videoWidth, m_videoHeight, (m_videoBitCount / 8) * m_videoWidth, PixelFormat.Format24bppRgb, pBuffer);
+
+            thing++;
+
+            if (thing > 50)
+            {
+                // Assuming 'bitmap' is the Bitmap that you want to convert to a byte array
+                Rectangle rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+                BitmapData bitmapData = bitmap.LockBits(rect, ImageLockMode.ReadOnly, bitmap.PixelFormat);
+                IntPtr ptr = bitmapData.Scan0;
+
+
+                // Calculate the size of the byte array based on the number of pixels and bytes per pixel
+                int bytesPerPixel = Bitmap.GetPixelFormatSize(bitmap.PixelFormat) / 8;
+                int byteCount = bitmapData.Stride * bitmap.Height;
+                byte[] byteArray = new byte[byteCount];
+
+                // Use Marshal.Copy to copy the pixel data from the bitmap to the byte array
+                Marshal.Copy(ptr, byteArray, 0, byteCount);
+
+                m_stream.WriteFrame(true, // is a key frame? (many codecs use the concept of key frames, for others - all frames are keys)
+                  byteArray, // an array with frame data
+                  0, // a starting index in the array
+                  byteCount // a length of the data
+                );
+
+                // Unlock the bitmap data and dispose of the bitmap
+                bitmap.UnlockBits(bitmapData);
+            }
+            if (thing == 650)
+                m_writer.Close();
+
             if (m_bWantOneFrame)
             {
                 m_bWantOneFrame = false;
@@ -179,6 +256,7 @@ namespace Camera_NET
             return 0;
         }
 
+        int thing = 0;
 
         /// <summary>
         /// Makes a snapshot of next frame
@@ -216,6 +294,8 @@ namespace Camera_NET
             }
 
             Bitmap bitmap = new Bitmap(m_videoWidth, m_videoHeight, (m_videoBitCount / 8) * m_videoWidth, pixelFormat, ip);
+
+
 
             bitmap_clone = bitmap.Clone(new Rectangle(0, 0, m_videoWidth, m_videoHeight), PixelFormat.Format24bppRgb);
             bitmap_clone.RotateFlip(RotateFlipType.RotateNoneFlipY);
@@ -291,6 +371,10 @@ namespace Camera_NET
         #endregion
 
         #region Private
+
+        private AviWriter m_writer;
+
+        private IAviVideoStream m_stream;
 
         /// <summary>
         /// Flag to wait for the async job to finish.
@@ -403,6 +487,11 @@ namespace Camera_NET
         }
 
         #endregion
+
+        ~SampleGrabberHelper()
+        {
+            m_writer.Close();
+        }
     }
 
 }
