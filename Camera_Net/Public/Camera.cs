@@ -1459,7 +1459,7 @@ namespace Camera_NET
             
             // Configure the sample grabber
             DX.SampleGrabberFilter = DX.SampleGrabber as IBaseFilter;
-            _pSampleGrabberHelper = new SampleGrabberHelper(DX.SampleGrabber, false);
+            _pSampleGrabberHelper = new SampleGrabberHelper(DX.SampleGrabber);
 
             _pSampleGrabberHelper.ConfigureMode();
 

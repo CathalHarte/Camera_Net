@@ -62,26 +62,14 @@ namespace Camera_NET
         /// Default constructor for <see cref="SampleGrabberHelper"/> class.
         /// </summary>
         /// <param name="sampleGrabber">Pointer to COM-interface ISampleGrabber.</param>
-        /// <param name="buffer_samples_of_current_frame">Flag means should helper store (buffer) samples of current frame or not.</param>
-        public SampleGrabberHelper(ISampleGrabber sampleGrabber, bool buffer_samples_of_current_frame)
+        public SampleGrabberHelper(ISampleGrabber sampleGrabber)
         {
             m_SampleGrabber = sampleGrabber;
-
-            m_bBufferSamplesOfCurrentFrame = buffer_samples_of_current_frame;
 
             // tell the callback to ignore new images
             m_PictureReady = new ManualResetEvent(false);
 
-            m_writer = new AviWriter("test.avi")
-            {
-                FramesPerSecond = 30,
-                // Emitting the AVI v1 index in addition to the OpenDML index (AVI v2)
-                // improves compatibility with some software, including 
-                // standard Windows programs like Media Player and File Explorer
-                EmitIndex1 = true
-            };
-
-            m_stream = m_writer.AddMJpegImageSharpVideoStream(1280, 720, quality: 70);
+            m_videoStreamWriter = new VideoStreamWriter("test.avi", 1280, 720, 30);
         }
 
         /// <summary>
@@ -123,16 +111,6 @@ namespace Camera_NET
             // http://msdn.microsoft.com/en-us/library/windows/desktop/dd376992%28v=vs.85%29.aspx
             hr = m_SampleGrabber.SetCallback(this, 1); // 1 == WhichMethodToCallback, call the ISampleGrabberCB::BufferCB method
             DsError.ThrowExceptionForHR(hr);
-
-            // To save current frame via SnapshotCurrentFrame
-            if (m_bBufferSamplesOfCurrentFrame)
-            {
-                //ISampleGrabber::SetBufferSamples method
-                // Note  [Deprecated. This API may be removed from future releases of Windows.]
-                // http://msdn.microsoft.com/en-us/windows/dd376991
-                hr = m_SampleGrabber.SetBufferSamples(true);
-                DsError.ThrowExceptionForHR(hr);
-            }
         }
 
         /// <summary>
@@ -182,58 +160,21 @@ namespace Camera_NET
             // Note that we depend on only being called once per call to Click.  Otherwise
             // a second call can overwrite the previous image.
             Debug.Assert(BufferLen == Math.Abs(m_videoBitCount/8*m_videoWidth) * m_videoHeight, "Incorrect buffer length");
-
-            Bitmap bitmap = new Bitmap(m_videoWidth, m_videoHeight, (m_videoBitCount / 8) * m_videoWidth, PixelFormat.Format32bppRgb, pBuffer);
-
             thing++;
 
             if (thing > 50)
             {
-                // Assuming 'bitmap' is the Bitmap that you want to convert to a byte array
-                Rectangle rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
-                bitmap.RotateFlip(RotateFlipType.RotateNoneFlipY);
-                BitmapData bitmapData = bitmap.LockBits(rect, ImageLockMode.ReadOnly, bitmap.PixelFormat);
-                IntPtr ptr = bitmapData.Scan0;
-
-
-                // Calculate the size of the byte array based on the number of pixels and bytes per pixel
-                int bytesPerPixel = Bitmap.GetPixelFormatSize(bitmap.PixelFormat) / 8;
-                int byteCount = bitmapData.Stride * bitmap.Height;
-                byte[] byteArray = new byte[byteCount];
-
-                // Use Marshal.Copy to copy the pixel data from the bitmap to the byte array
-                Marshal.Copy(ptr, byteArray, 0, byteCount);
-
-                
-
-                m_stream.WriteFrame(true, // is a key frame? (many codecs use the concept of key frames, for others - all frames are keys)
-                  byteArray, // an array with frame data
-                  0, // a starting index in the array
-                  byteCount // a length of the data
-                );
-
-                // Unlock the bitmap data and dispose of the bitmap
-                bitmap.UnlockBits(bitmapData);
+                // m_videoStreamWriter?.SaveFrameCallback(pBuffer, BufferLen, PixelFormat.Format32bppRgb);
             }
+
             if (thing == 650)
-                m_writer.Close();
-
-            if (m_bWantOneFrame)
-            {
-                m_bWantOneFrame = false;
-                Debug.Assert(m_ipBuffer != IntPtr.Zero, "Unitialized buffer");
-
-                // Save the buffer
-                NativeMethodes.CopyMemory(m_ipBuffer, pBuffer, BufferLen);
-
-                // Picture is ready.
-                m_PictureReady.Set();
-            }
+                m_videoStreamWriter = null;
 
             return 0;
         }
 
-        int thing = 0;
+        private int thing;
+
 
         /// <summary>
         /// Makes a snapshot of next frame
@@ -241,132 +182,19 @@ namespace Camera_NET
         /// <returns>Bitmap with snapshot</returns>
         public Bitmap SnapshotNextFrame()
         {
-            if (m_SampleGrabber == null)
-                throw new Exception("SampleGrabber was not initialized");
-
-            // capture image
-            IntPtr ip = GetNextFrame();
-
-            if (ip == IntPtr.Zero)
-            {
-                throw new Exception("Can not snap next frame");
-            }
-
-            Bitmap bitmap_clone = null;
-            
-            PixelFormat pixelFormat = PixelFormat.Format24bppRgb;
-            switch (m_videoBitCount)
-            {
-                case 24:
-                    pixelFormat = PixelFormat.Format24bppRgb;
-                    break;
-                case 32:
-                    pixelFormat = PixelFormat.Format32bppRgb;
-                    break;
-                case 48:
-                    pixelFormat = PixelFormat.Format48bppRgb;
-                    break;
-                default:
-                    throw new Exception("Unsupported BitCount");
-            }
-
-            Bitmap bitmap = new Bitmap(m_videoWidth, m_videoHeight, (m_videoBitCount / 8) * m_videoWidth, pixelFormat, ip);
-
-
-
-            bitmap_clone = bitmap.Clone(new Rectangle(0, 0, m_videoWidth, m_videoHeight), PixelFormat.Format24bppRgb);
-            bitmap_clone.RotateFlip(RotateFlipType.RotateNoneFlipY);
-
-            // Release any previous buffer
-            if (ip != IntPtr.Zero)
-            {
-                Marshal.FreeCoTaskMem(ip);
-                ip = IntPtr.Zero;
-            }
-
-            bitmap.Dispose();
-            bitmap = null;
-
-            return bitmap_clone;
+            throw new NotImplementedException();
         }
-
-
-        /// <summary>
-        /// Makes a snapshot of current frame
-        /// </summary>
-        /// <returns>Bitmap with snapshot</returns>
-        public Bitmap SnapshotCurrentFrame()
-        {
-            if (m_SampleGrabber == null)
-                throw new Exception("SampleGrabber was not initialized");
-
-            if (!m_bBufferSamplesOfCurrentFrame)
-                throw new Exception("SampleGrabberHelper was created without buffering-mode (buffer of current frame)");
-
-            // capture image
-            IntPtr ip = GetCurrentFrame();
-
-            Bitmap bitmap_clone = null;
-
-            PixelFormat pixelFormat = PixelFormat.Format24bppRgb;
-            switch (m_videoBitCount)
-            {
-                case 24:
-                    pixelFormat = PixelFormat.Format24bppRgb;
-                    break;
-                case 32:
-                    pixelFormat = PixelFormat.Format32bppRgb;
-                    break;
-                case 48:
-                    pixelFormat = PixelFormat.Format48bppRgb;
-                    break;
-                default:
-
-                    throw new Exception("Unsupported BitCount");
-            }
-
-            Bitmap bitmap = new Bitmap(m_videoWidth, m_videoHeight, (m_videoBitCount / 8) * m_videoWidth, pixelFormat, ip);
-
-            bitmap_clone = bitmap.Clone(new Rectangle(0, 0, m_videoWidth, m_videoHeight), PixelFormat.Format24bppRgb);
-            bitmap_clone.RotateFlip(RotateFlipType.RotateNoneFlipY);
-
-
-            // Release any previous buffer
-            if (ip != IntPtr.Zero)
-            {
-                Marshal.FreeCoTaskMem(ip);
-                ip = IntPtr.Zero;
-            }
-
-            bitmap.Dispose();
-            bitmap = null;
-
-            return bitmap_clone;
-        }
-
 
         #endregion
 
         #region Private
 
-        private AviWriter m_writer;
-
-        private IAviVideoStream m_stream;
+        private VideoStreamWriter m_videoStreamWriter;
 
         /// <summary>
         /// Flag to wait for the async job to finish.
         /// </summary>
         private volatile ManualResetEvent m_PictureReady = null;
-
-        /// <summary>
-        /// Flag indicates we want to store a frame.
-        /// </summary>
-        private volatile bool m_bWantOneFrame = false;
-
-        /// <summary>
-        /// Buffer for bitmap data.  Always release by caller.
-        /// </summary>
-        private IntPtr m_ipBuffer = IntPtr.Zero;
 
         /// <summary>
         /// Video frame width. Calculated once in constructor for perf.
@@ -393,82 +221,70 @@ namespace Camera_NET
         /// </summary>
         private ISampleGrabber m_SampleGrabber = null;
 
-        /// <summary>
-        /// Flag means should helper store (buffer) samples of current frame or not.
-        /// </summary>
-        private bool m_bBufferSamplesOfCurrentFrame = false;
-
-        /// <summary>
-        /// Get the image from the Still pin.  The returned image can turned into a bitmap with
-        /// Bitmap b = new Bitmap(cam.Width, cam.Height, cam.Stride, PixelFormat.Format24bppRgb, m_ip);
-        /// If the image is upside down, you can fix it with
-        /// b.RotateFlip(RotateFlipType.RotateNoneFlipY);
-        /// </summary>
-        /// <returns>Returned pointer to be freed by caller with Marshal.FreeCoTaskMem</returns>
-        private IntPtr GetNextFrame()
-        {
-            // get ready to wait for new image
-            m_PictureReady.Reset();
-            m_ipBuffer = Marshal.AllocCoTaskMem(Math.Abs(m_videoBitCount / 8 * m_videoWidth) * m_videoHeight);
-
-            try
-            {
-                m_bWantOneFrame = true;
-
-                // Start waiting
-                if (!m_PictureReady.WaitOne(1000, false))
-                {
-                    throw new Exception("Timeout while waiting to get a snapshot");
-                }
-            }
-            catch
-            {
-                Marshal.FreeCoTaskMem(m_ipBuffer);
-                m_ipBuffer = IntPtr.Zero;
-                throw;
-            }
-
-            // Got one
-            return m_ipBuffer;
-        }
-
-        /// <summary>
-        /// Grab a snapshot of the most recent image played.
-        /// Returns A pointer to the raw pixel data.
-        /// Caller must release this memory with Marshal.FreeCoTaskMem when it is no longer needed.
-        /// </summary>
-        /// <returns>A pointer to the raw pixel data</returns>
-        private IntPtr GetCurrentFrame()
-        {
-            if (!m_bBufferSamplesOfCurrentFrame)
-                throw new Exception("SampleGrabberHelper was created without buffering-mode (buffer of current frame)");
-
-            int hr = 0;
-
-            IntPtr ip = IntPtr.Zero;
-            int iBuffSize = 0;
-
-            // Read the buffer size
-            hr = m_SampleGrabber.GetCurrentBuffer(ref iBuffSize, ip);
-            DsError.ThrowExceptionForHR(hr);
-
-            Debug.Assert(iBuffSize == m_ImageSize, "Unexpected buffer size");
-
-            // Allocate the buffer and read it
-            ip = Marshal.AllocCoTaskMem(iBuffSize);
-
-            hr = m_SampleGrabber.GetCurrentBuffer(ref iBuffSize, ip);
-            DsError.ThrowExceptionForHR(hr);
-
-            return ip;
-        }
-
         #endregion
-
-        ~SampleGrabberHelper()
-        {
-            m_writer.Close();
-        }
     }
 
+
+    internal sealed class VideoStreamWriter
+    {
+        private readonly AviWriter _writer;
+        private readonly IAviVideoStream _stream;
+        private readonly int _videoWidth;
+        private readonly int _videoHeight;
+
+        public VideoStreamWriter(string fileName, int videoWidth, int videoHeight, int framesPerSecond, int quality = 70, bool emitIndex1 = true)
+        {
+            _writer = new AviWriter(fileName)
+            {
+                FramesPerSecond = framesPerSecond,
+                EmitIndex1 = emitIndex1
+            };
+
+            _videoWidth = videoWidth;
+            _videoHeight = videoHeight;
+
+            _stream = _writer.AddMJpegImageSharpVideoStream(videoWidth, videoHeight, quality);
+        }
+
+        public void WriteFrame(byte[] frameData)
+        {
+            if (_stream == null)
+            {
+                throw new InvalidOperationException("The video stream is not initialized.");
+            }
+
+            _stream.WriteFrame(true, frameData, 0, frameData.Length);
+        }
+
+        /// <summary>
+        /// Assumes that the video dimensions match that of the initialised values
+        /// </summary>
+        public void SaveFrameCallback(IntPtr pBuffer, int bufferLen, PixelFormat pixelFormat)
+        {
+            var bitmap = new Bitmap(_videoWidth, _videoHeight, (bufferLen / _videoHeight) * _videoWidth, pixelFormat, pBuffer);
+
+            // Assuming 'bitmap' is the Bitmap that you want to convert to a byte array
+            var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+            bitmap.RotateFlip(RotateFlipType.RotateNoneFlipY);
+            var bitmapData = bitmap.LockBits(rect, ImageLockMode.ReadOnly, bitmap.PixelFormat);
+            var ptr = bitmapData.Scan0;
+
+            // Calculate the size of the byte array
+            var byteCount = bitmapData.Stride * bitmap.Height;
+            var byteArray = new byte[byteCount];
+
+            // Use Marshal.Copy to copy the pixel data from the bitmap to the byte array
+            Marshal.Copy(ptr, byteArray, 0, byteCount);
+
+            WriteFrame(byteArray);
+
+            // Unlock the bitmap data and dispose of the bitmap
+            bitmap.UnlockBits(bitmapData);
+        }
+
+        ~VideoStreamWriter()
+        {
+            _writer.Close();
+        }
+    }
 }
